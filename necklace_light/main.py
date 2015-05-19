@@ -1,7 +1,7 @@
 import rhinoscriptsyntax as rs
 import math
 
-samples = 15
+samples = 50
 
 bend_radius = 4
 
@@ -18,7 +18,7 @@ def points_from_ellipse(ellipse, even):
   ellipse_step = (ellipse_domain[1] - ellipse_domain[0])/points_on_cross_section
   points = []
   j = 0
-  for i in rs.frange(ellipse_domain[0], ellipse_domain[1], ellipse_step):
+  for i in rs.frange(ellipse_domain[0], ellipse_domain[1] - ((ellipse_domain[1] - ellipse_domain[0])/2), ellipse_step):
     if even:
       if j % 2 == 0:
         points.append(rs.EvaluateCurve(ellipse, i))
@@ -35,11 +35,35 @@ def points_from_cross(cross_sections):
     arr.append(points)
   return arr
 
-def add_spheres(points):
-  print(points)
+def add_text(points):
   for i in range(0, len(points)):
     for j in range(0, len(points[i])):
-      rs.AddSphere(points[i][j], 1)
+      rs.AddText(str(j), points[i][j], 2)
+
+def create_nodes(points):
+  for i in range(0, len(points)):
+    if(i+1 < len(points)):
+      for j in range(0, len(points[i]) - 1):
+        second_point_index = j-1 % (len(points[i]))
+        fl = rs.AddLine(points[i+1][j], points[i][j])
+        rs.ObjectColor(fl, [255, 100, 100])
+        fv = rs.VectorUnitize(rs.VectorCreate(points[i+1][j], points[i][j]))
+        fv_scaled_vector = rs.VectorScale(fv, rs.Distance(points[i+1][j], points[i][j]) * 0.3)
+        efv_scaled_vector = rs.VectorScale(fv, rs.Distance(points[i+1][j], points[i][j]) * 0.7)
+        fp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], fv_scaled_vector), fv)
+        efp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], efv_scaled_vector), fv)
+        rs.AddCircle(fp, 1.5)
+        rs.AddCircle(efp, 1.5)
+        if(j > 0):
+          sl = rs.AddLine(points[i+1][second_point_index], points[i][j])
+          rs.ObjectColor(sl, [255, 100, 100])
+          sv = rs.VectorUnitize(rs.VectorCreate(points[i+1][second_point_index], points[i][j]))
+          sv_scaled_vector = rs.VectorScale(sv, rs.Distance(points[i+1][second_point_index], points[i][j]) * 0.3)
+          esv_scaled_vector = rs.VectorScale(sv, rs.Distance(points[i+1][second_point_index], points[i][j]) * 0.7)
+          sp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], sv_scaled_vector), sv)
+          esp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], esv_scaled_vector), sv)
+          rs.AddCircle(sp, 1.5)
+          rs.AddCircle(esp, 1.5)
 
 def FlatWorm():
   curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
@@ -80,7 +104,8 @@ def FlatWorm():
     return
 
   points = points_from_cross(crosssections)
-  add_spheres(points)
+  add_text(points)
+  create_nodes(points)
   # lines = polyline_lists(points)
   # add_polylines(lines)
   rs.DeleteObjects(crosssections)
