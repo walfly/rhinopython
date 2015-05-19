@@ -43,18 +43,19 @@ def add_text(points):
 def create_nodes(points):
   for i in range(0, len(points)):
     if(i+1 < len(points)):
-      for j in range(0, len(points[i]) - 1):
-        second_point_index = j-1 % (len(points[i]))
-        fl = rs.AddLine(points[i+1][j], points[i][j])
-        rs.ObjectColor(fl, [255, 100, 100])
-        fv = rs.VectorUnitize(rs.VectorCreate(points[i+1][j], points[i][j]))
-        fv_scaled_vector = rs.VectorScale(fv, rs.Distance(points[i+1][j], points[i][j]) * 0.3)
-        efv_scaled_vector = rs.VectorScale(fv, rs.Distance(points[i+1][j], points[i][j]) * 0.7)
-        fp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], fv_scaled_vector), fv)
-        efp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], efv_scaled_vector), fv)
-        rs.AddCircle(fp, 1.5)
-        rs.AddCircle(efp, 1.5)
-        if(j > 0):
+      for j in range(0, len(points[i])):
+        if(j < len(points[i + 1])):
+          fl = rs.AddLine(points[i+1][j], points[i][j])
+          rs.ObjectColor(fl, [255, 100, 100])
+          fv = rs.VectorUnitize(rs.VectorCreate(points[i+1][j], points[i][j]))
+          fv_scaled_vector = rs.VectorScale(fv, rs.Distance(points[i+1][j], points[i][j]) * 0.3)
+          efv_scaled_vector = rs.VectorScale(fv, rs.Distance(points[i+1][j], points[i][j]) * 0.7)
+          fp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], fv_scaled_vector), fv)
+          efp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], efv_scaled_vector), fv)
+          rs.AddCircle(fp, 1.5)
+          rs.AddCircle(efp, 1.5)
+        if(j < len(points[i + 1]) - 1):
+          second_point_index = (j + 1) % (len(points[i + 1]))
           sl = rs.AddLine(points[i+1][second_point_index], points[i][j])
           rs.ObjectColor(sl, [255, 100, 100])
           sv = rs.VectorUnitize(rs.VectorCreate(points[i+1][second_point_index], points[i][j]))
@@ -62,8 +63,8 @@ def create_nodes(points):
           esv_scaled_vector = rs.VectorScale(sv, rs.Distance(points[i+1][second_point_index], points[i][j]) * 0.7)
           sp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], sv_scaled_vector), sv)
           esp = rs.PlaneFromNormal(rs.PointAdd(points[i][j], esv_scaled_vector), sv)
-          rs.AddCircle(sp, 1.5)
-          rs.AddCircle(esp, 1.5)
+          rs.AddCircle(sp, 1)
+          rs.AddCircle(esp, 1)
 
 def FlatWorm():
   curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
