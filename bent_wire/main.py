@@ -69,13 +69,53 @@ class PathLattice:
       for i in range(0, len(self.point_lists)):
         modulo = len(self.point_lists[i])
         if(i % 2 == 0):
-          points_1.append(self.move_point_up(self.point_lists[i][(j+i) % modulo], i))
-          points_2.append(self.move_point_down(self.point_lists[i][(j+i) % modulo], i))
+          point_index = (j+i) % modulo
+          points_1.append(self.move_point_up(self.point_lists[i][point_index], i, point_index))
+          points_2.append(self.move_point_down(self.point_lists[i][point_index], i, point_index))
         else:
-          points_1.append(self.move_point_down(self.point_lists[i][(j+i) % modulo], i))
-          points_2.append(self.move_point_up(self.point_lists[i][((j+i) - 1) % modulo], i))
+          point_1_index = (j+i) % modulo
+          point_2_index = ((j+i) - 1) % modulo
+          points_1.append(self.move_point_down(self.point_lists[i][point_1_index], i, point_1_index))
+          points_2.append(self.move_point_up(self.point_lists[i][point_2_index], i, point_2_index))
       self.line_points.append(points_1)
       self.line_points.append(points_2)
+
+  def move_point_up(self, point, cross_section_index, point_index):
+    if(cross_section_index > 0):
+      modulo = len(self.point_lists[cross_section_index - 1])
+      prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 2) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index - 1) % modulo]
+      prev_point_2 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][point_index]
+      in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
+      third_point = rs.EvaluateCurve(self.curve_object, rs.CurveClosestPoint(self.curve_object, point))
+      plane = rs.PlaneFromFrame(point, in_between_vector, (0,0,1))
+      normal = rs.SurfaceNormal(rs.AddPlaneSurface(plane, 1, 1), [0,0])
+      return rs.PointAdd(point, rs.VectorUnitize(normal))
+    else:
+      curve = self.cross_sections[cross_section_index]
+      parameter = rs.CurveClosestPoint(curve, point)
+      tangent = rs.CurveTangent(curve, parameter)
+      unit_vector = rs.VectorUnitize(tangent)
+      scale_vector = rs.VectorScale(unit_vector, 1.5)
+      return rs.PointAdd(point, scale_vector)
+
+  def move_point_down(self, point, cross_section_index, point_index):
+    if(cross_section_index > 0):
+      modulo = len(self.point_lists[cross_section_index - 1])
+      prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 2) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index - 1) % modulo]
+      prev_point_2 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][point_index]
+      in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
+      third_point = rs.EvaluateCurve(self.curve_object, rs.CurveClosestPoint(self.curve_object, point))
+      plane = rs.PlaneFromFrame(point, in_between_vector, (0,0,1))
+      normal = rs.SurfaceNormal(rs.AddPlaneSurface(plane, 1, 1), [0,0])
+      return rs.PointAdd(point, rs.VectorReverse(rs.VectorUnitize(normal)))
+    else:
+      curve = self.cross_sections[cross_section_index]
+      parameter = rs.CurveClosestPoint(curve, point)
+      tangent = rs.CurveTangent(curve, parameter)
+      unit_vector = rs.VectorUnitize(tangent)
+      scale_vector = rs.VectorReverse(rs.VectorScale(unit_vector, 1.5))
+      return rs.PointAdd(point, scale_vector)
+
 
   def create_lines(self):
     self.line_lists = []
@@ -91,7 +131,7 @@ class PathLattice:
       fillets = []
       new_line = []
       for j in range(0, len(self.line_lists[i]) - 1):
-        fillets.append(rs.AddFilletCurve(self.line_lists[i][j], self.line_lists[i][j + 1], 1))
+        fillets.append(rs.AddFilletCurve(self.line_lists[i][j], self.line_lists[i][j + 1], 4))
       for k in range(0, len(self.line_lists[i])):
         line = self.line_lists[i][k]
         if(k < len(self.line_lists[i]) - 1):
@@ -114,21 +154,6 @@ class PathLattice:
 
     rs.DeleteObjects(self.lines)
 
-  def move_point_up(self, point, cross_section_index):
-    curve = self.cross_sections[cross_section_index]
-    parameter = rs.CurveClosestPoint(curve, point)
-    tangent = rs.CurveTangent(curve, parameter)
-    unit_vector = rs.VectorUnitize(tangent)
-    scale_vector = rs.VectorScale(unit_vector, 1.5)
-    return rs.PointAdd(point, scale_vector)
-
-  def move_point_down(self, point, cross_section_index):
-    curve = self.cross_sections[cross_section_index]
-    parameter = rs.CurveClosestPoint(curve, point)
-    tangent = rs.CurveTangent(curve, parameter)
-    unit_vector = rs.VectorUnitize(tangent)
-    scale_vector = rs.VectorReverse(rs.VectorScale(unit_vector, 1.5))
-    return rs.PointAdd(point, scale_vector)
 
   def reverse_if_needed(self, current, previous):
     dot_product = rs.VectorDotProduct(current, previous)
