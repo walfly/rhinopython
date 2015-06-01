@@ -7,15 +7,15 @@ class PathLattice:
 
   BEND_RADIUS = 4
 
-  PERP_RADIUS = 2
+  PERP_RADIUS = 4
 
   POINTS_ON_CROSS_SECTION = 20
 
 
   def __init__(self):
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
-    self.needs_flip = False
     self.create_cross_sections()
+    self.brep = rs.AddLoftSrf(self.cross_sections)
     self.points_from_cross()
     self.add_text()
     self.points_for_lines()
@@ -23,6 +23,7 @@ class PathLattice:
     self.fillet_lines()
     self.pipe_lines()
     self.delete_cross_sections()
+    rs.DeleteObjects(self.brep)
 
 
 
@@ -69,26 +70,29 @@ class PathLattice:
       for i in range(0, len(self.point_lists)):
         modulo = len(self.point_lists[i])
         if(i % 2 == 0):
-          point_index = (j+i) % modulo
+          point_index = (j) % modulo
           points_1.append(self.move_point_up(self.point_lists[i][point_index], i, point_index))
           points_2.append(self.move_point_down(self.point_lists[i][point_index], i, point_index))
         else:
-          point_1_index = (j+i) % modulo
-          point_2_index = ((j+i) - 1) % modulo
+          point_1_index = (j) % modulo
+          point_2_index = ((j) - 1) % modulo
           points_1.append(self.move_point_down(self.point_lists[i][point_1_index], i, point_1_index))
           points_2.append(self.move_point_up(self.point_lists[i][point_2_index], i, point_2_index))
       self.line_points.append(points_1)
       self.line_points.append(points_2)
 
+  def offset_vector(self, point, cross_section_index, point_index):
+      modulo = len(self.point_lists[cross_section_index - 1])
+      prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index + 1) % modulo]
+      prev_point_2 = self.point_lists[cross_section_index - 1][(point_index) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][point_index]
+      in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
+      normal_vector = rs.SurfaceNormal(self.brep, rs.SurfaceClosestPoint(self.brep, point))
+      plane = rs.PlaneFromFrame(point, in_between_vector, normal_vector)
+      return rs.SurfaceNormal(rs.AddPlaneSurface(plane, 1, 1), [0,0])
+
   def move_point_up(self, point, cross_section_index, point_index):
     if(cross_section_index > 0):
-      modulo = len(self.point_lists[cross_section_index - 1])
-      prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 2) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index - 1) % modulo]
-      prev_point_2 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][point_index]
-      in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
-      third_point = rs.EvaluateCurve(self.curve_object, rs.CurveClosestPoint(self.curve_object, point))
-      plane = rs.PlaneFromFrame(point, in_between_vector, (0,0,1))
-      normal = rs.SurfaceNormal(rs.AddPlaneSurface(plane, 1, 1), [0,0])
+      normal = self.offset_vector(point, cross_section_index, point_index)
       return rs.PointAdd(point, rs.VectorUnitize(normal))
     else:
       curve = self.cross_sections[cross_section_index]
@@ -100,13 +104,7 @@ class PathLattice:
 
   def move_point_down(self, point, cross_section_index, point_index):
     if(cross_section_index > 0):
-      modulo = len(self.point_lists[cross_section_index - 1])
-      prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 2) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index - 1) % modulo]
-      prev_point_2 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][point_index]
-      in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
-      third_point = rs.EvaluateCurve(self.curve_object, rs.CurveClosestPoint(self.curve_object, point))
-      plane = rs.PlaneFromFrame(point, in_between_vector, (0,0,1))
-      normal = rs.SurfaceNormal(rs.AddPlaneSurface(plane, 1, 1), [0,0])
+      normal = self.offset_vector(point, cross_section_index, point_index)
       return rs.PointAdd(point, rs.VectorReverse(rs.VectorUnitize(normal)))
     else:
       curve = self.cross_sections[cross_section_index]
@@ -115,7 +113,6 @@ class PathLattice:
       unit_vector = rs.VectorUnitize(tangent)
       scale_vector = rs.VectorReverse(rs.VectorScale(unit_vector, 1.5))
       return rs.PointAdd(point, scale_vector)
-
 
   def create_lines(self):
     self.line_lists = []
@@ -131,7 +128,7 @@ class PathLattice:
       fillets = []
       new_line = []
       for j in range(0, len(self.line_lists[i]) - 1):
-        fillets.append(rs.AddFilletCurve(self.line_lists[i][j], self.line_lists[i][j + 1], 4))
+        fillets.append(rs.AddFilletCurve(self.line_lists[i][j], self.line_lists[i][j + 1], 1))
       for k in range(0, len(self.line_lists[i])):
         line = self.line_lists[i][k]
         if(k < len(self.line_lists[i]) - 1):
