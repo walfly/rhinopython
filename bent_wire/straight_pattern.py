@@ -5,9 +5,9 @@ import math
 class PathLattice:
   SAMPLES = 25
 
-  BEND_RADIUS = 4
+  BEND_RADIUS = 20
 
-  PERP_RADIUS = 4
+  PERP_RADIUS = 20
 
   POINTS_ON_CROSS_SECTION = 20
 
@@ -24,8 +24,6 @@ class PathLattice:
     self.pipe_lines()
     self.delete_cross_sections()
     rs.DeleteObjects(self.brep)
-
-
 
   def create_scalar(self, step):
     squared = math.sin(step) * math.sin(step)
@@ -91,20 +89,20 @@ class PathLattice:
 
   def offset_vector(self, point, cross_section_index, point_index):
       modulo = len(self.point_lists[cross_section_index - 1])
-      prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 2) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index - 1) % modulo]
-      prev_point_2 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][point_index]
+      prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index + 1) % modulo]
+      prev_point_2 = self.point_lists[cross_section_index - 1][point_index]
       in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
       normal_vector = rs.SurfaceNormal(self.brep, rs.SurfaceClosestPoint(self.brep, point))
       plane = rs.PlaneFromFrame(point, in_between_vector, normal_vector)
       vector = rs.SurfaceNormal(rs.AddPlaneSurface(plane, 1, 1), [0,0])
       unit_vector = rs.VectorUnitize(vector)
-      return [rs.VectorScale(unit_vector, 2), in_between_vector]
+      return [rs.VectorScale(unit_vector, 1), in_between_vector]
 
   def move_point_up(self, point, cross_section_index, point_index):
     if(cross_section_index > 0):
       offset_vectors = self.offset_vector(point, cross_section_index, point_index)
       normal = offset_vectors[0]
-      scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), 3)
+      scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), 1)
       new_point = rs.PointAdd(point, normal)
       return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
     else:
@@ -119,7 +117,7 @@ class PathLattice:
     if(cross_section_index > 0):
       offset_vectors = self.offset_vector(point, cross_section_index, point_index)
       normal = rs.VectorReverse(offset_vectors[0])
-      scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), 3)
+      scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), 1)
       new_point = rs.PointAdd(point, normal)
       return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
     else:
@@ -227,7 +225,7 @@ class PathLattice:
       if crosssectionplane:
         prev_perp = crosssectionplane.XAxis
         prev_normal = crosssectionplane.YAxis
-        pi_scalar = self.create_scalar(pi_step)
+        pi_scalar = 1
         radii = self.ellipse_radii(pi_scalar)
         csec = rs.AddEllipse(crosssectionplane, radii[0], radii[1])
         self.cross_sections.append(csec)
