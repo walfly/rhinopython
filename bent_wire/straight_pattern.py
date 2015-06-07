@@ -3,17 +3,17 @@ import math
 
 
 class PathLattice:
-  SAMPLES = 25
+  SAMPLES = 28
 
   BEND_RADIUS = 2
 
-  PERP_RADIUS = 2
+  PERP_RADIUS = 1.5
 
   POINTS_ON_CROSS_SECTION = 20
 
-  FLAT_LENGTH = 1
+  FLAT_LENGTH = 0.75
 
-  RADIUS_SCALAR = 2.5
+  RADIUS_SCALAR = 1.75
 
   def __init__(self):
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
@@ -25,7 +25,7 @@ class PathLattice:
     self.create_lines()
     self.fillet_lines()
     self.pipe_lines()
-    # self.delete_cross_sections()
+    self.delete_cross_sections()
     rs.DeleteObjects(self.brep)
 
 
@@ -88,51 +88,27 @@ class PathLattice:
       self.line_points.append(points_2)
 
   def offset_vector(self, point, cross_section_index, point_index):
-      modulo = len(self.point_lists[cross_section_index - 1])
-      # prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index + 1) % modulo]
-      # prev_point_2 = self.point_lists[cross_section_index - 1][point_index]
-      # in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
-      # normal_vector = rs.SurfaceNormal(self.brep, rs.SurfaceClosestPoint(self.brep, point))
+      modulo = len(self.point_lists[cross_section_index])
       closest_point = rs.CurveClosestPoint(self.cross_sections[cross_section_index], point)
       crv = rs.CurveCurvature(self.cross_sections[cross_section_index], closest_point)
       crvTangent = crv[1]
       crvPerp = rs.VectorUnitize(crv[4])
-      # plane = rs.PlaneFromFrame(point, in_between_vector, normal_vector)
-      # surf = rs.AddPlaneSurface(plane, 1, 1)
-      # vector = rs.SurfaceNormal(surf, [0,0])
-      # rs.DeleteObjects(surf)
       unit_vector = rs.VectorUnitize(crvTangent)
-      return [rs.VectorScale(unit_vector, 0.45), crvPerp]
+      return [rs.VectorScale(unit_vector, 0.35), rs.VectorReverse(rs.VectorCrossProduct(crvTangent, crvPerp))]
 
   def move_point_up(self, point, cross_section_index, point_index):
-    if(cross_section_index > 0):
-      offset_vectors = self.offset_vector(point, cross_section_index, point_index)
-      normal = offset_vectors[0]
-      scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
-      new_point = rs.PointAdd(point, normal)
-      return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
-    else:
-      curve = self.cross_sections[cross_section_index]
-      parameter = rs.CurveClosestPoint(curve, point)
-      tangent = rs.CurveTangent(curve, parameter)
-      unit_vector = rs.VectorUnitize(tangent)
-      scale_vector = rs.VectorScale(unit_vector, 0.25)
-      return [rs.PointAdd(point, scale_vector)]
+    offset_vectors = self.offset_vector(point, cross_section_index, point_index)
+    normal = offset_vectors[0]
+    scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+    new_point = rs.PointAdd(point, normal)
+    return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
 
   def move_point_down(self, point, cross_section_index, point_index):
-    if(cross_section_index > 0):
-      offset_vectors = self.offset_vector(point, cross_section_index, point_index)
-      normal = rs.VectorReverse(offset_vectors[0])
-      scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
-      new_point = rs.PointAdd(point, normal)
-      return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
-    else:
-      curve = self.cross_sections[cross_section_index]
-      parameter = rs.CurveClosestPoint(curve, point)
-      tangent = rs.CurveTangent(curve, parameter)
-      unit_vector = rs.VectorUnitize(tangent)
-      scale_vector = rs.VectorReverse(rs.VectorScale(unit_vector, 0.25))
-      return [rs.PointAdd(point, scale_vector)]
+    offset_vectors = self.offset_vector(point, cross_section_index, point_index)
+    normal = rs.VectorReverse(offset_vectors[0])
+    scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+    new_point = rs.PointAdd(point, normal)
+    return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
 
   def create_lines(self):
     self.line_lists = []
@@ -148,18 +124,20 @@ class PathLattice:
       fillets = []
       new_line = []
       for j in range(0, len(self.line_lists[i]) - 1):
-        fillets.append(rs.AddFilletCurve(self.line_lists[i][j], self.line_lists[i][j + 1], 0.125))
+        first_line = self.line_lists[i][j]
+        second_line = self.line_lists[i][j+1]
+        fillet = rs.AddFilletCurve(first_line, second_line, 0.125)
+        fillet_points = rs.CurveFilletPoints(first_line, second_line, 0.125)
+        first_cp = rs.CurveClosestPoint(first_line, fillet_points[0])
+        first_domain = rs.CurveDomain(first_line) 
+        self.line_lists[i][j] = rs.TrimCurve(first_line, (first_domain[0], first_cp), True)
+        second_cp = rs.CurveClosestPoint(second_line, fillet_points[1])
+        second_domain = rs.CurveDomain(second_line)
+
+        self.line_lists[i][j + 1] = rs.TrimCurve(second_line, (second_cp, second_domain[1]), True)
+        fillets.append(fillet)
       for k in range(0, len(self.line_lists[i])):
-        line = self.line_lists[i][k]
-        if(k < len(self.line_lists[i]) - 1):
-          line_domain = rs.CurveDomain(line)
-          line_intersect = rs.CurveCurveIntersection(line, fillets[k])[0][5]
-          line = rs.TrimCurve(self.line_lists[i][k], (line_domain[0], line_intersect), True)
-        if(k > 0):
-          line_domain = rs.CurveDomain(line)
-          line_intersect = rs.CurveCurveIntersection(line, fillets[k-1])
-          line = rs.TrimCurve(line, (line_intersect[0][5], line_domain[1]), True)
-        new_line.append(line)
+        new_line.append(self.line_lists[i][k])
         if(k < len(self.line_lists[i]) - 1):
           new_line.append(fillets[k])
       new_curve = self.get_curve_from_segments(new_line)
@@ -179,8 +157,7 @@ class PathLattice:
   def pipe_lines(self):
     self.pipes = []
     for i in range(0, len(self.lines)):
-      print self.lines[i]
-      self.pipes.append(rs.AddPipe(self.lines[i], 0, 0.09375))
+      self.pipes.append(rs.AddPipe(self.lines[i], 0, 0.09375, 0, 1))
 
     rs.DeleteObjects(self.lines)
 
@@ -222,7 +199,7 @@ class PathLattice:
 
   def calc_step(self, t_step, pi_step):
     squared = math.sin(pi_step) * math.sin(pi_step)
-    return t_step * ((squared * 1.1) + 0.45)
+    return t_step * ((squared * 1) + 0.5)
 
   def create_scalar(self, step):
     squared = math.sin(step) * math.sin(step)
@@ -257,7 +234,7 @@ class PathLattice:
         csec = rs.AddEllipse(crosssectionplane, radii[0], radii[1])
         self.cross_sections.append(csec)
         self.cross_section_planes.append(crosssectionplane)
-      t +=  t_step #self.calc_step(t_step, pi_step)
+      t +=  t_step#self.calc_step(t_step, pi_step)
       pi_step += pi_step_size
 
 rs.EnableRedraw(False)
