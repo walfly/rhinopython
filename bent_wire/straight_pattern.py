@@ -1,33 +1,70 @@
 import rhinoscriptsyntax as rs
 import math
 
+import os 
+dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class PathLattice:
-  SAMPLES = 28
+  SAMPLES = 14
 
-  BEND_RADIUS = 2
+  BEND_RADIUS = 2.2
 
-  PERP_RADIUS = 1.5
+  PERP_RADIUS = 2
 
   POINTS_ON_CROSS_SECTION = 20
 
-  FLAT_LENGTH = 0.75
+  FLAT_LENGTH = 0.6
 
-  RADIUS_SCALAR = 1.75
+  RADIUS_SCALAR = 1.8
 
   def __init__(self):
+    self.midpoints = []
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
+    self.outFile = rs.GetString('Input a name for the length file')
     self.create_cross_sections()
     self.brep = rs.AddLoftSrf(self.cross_sections)
     self.points_from_cross()
     # self.add_text()
     self.points_for_lines()
     self.create_lines()
-    self.fillet_lines()
-    self.pipe_lines()
+    self.label_and_len_lines();
+    # self.fillet_lines()
+    # self.pipe_lines()
     self.delete_cross_sections()
     rs.DeleteObjects(self.brep)
+    self.draw_points()
 
+  def add_text(self):
+    for i in range(0, len(self.point_lists)):
+      rs.AddText(str(i), self.cross_section_planes[i].Origin, 5)
+      for j in range(0, len(self.point_lists[i])):
+        rs.AddText(str(j), self.point_lists[i][j], 2)
+
+  def label_and_len_lines(self):
+    f = open('{0}/{1}.txt'.format(dir_path, self.outFile), 'w')
+    dists = []
+    for i in range(0, len(self.all_lines)):
+      curr_len = rs.CurveLength(self.all_lines[i])
+      if math.fabs(curr_len - self.FLAT_LENGTH) > 0.000001:
+        dists.append('%.3f' % curr_len)
+        mp = rs.CurveMidPoint(self.all_lines[i])
+        rs.AddText('line{0}'.format(i), mp, 0.3)
+        f.write('line{0}: {1}\n'.format(i, curr_len))
+        rs.AddPipe(self.all_lines[i], 0, 0.09375, 0, 1)
+    f.close()
+    print(set(dists))
+    
+
+
+  def draw_points(self):
+    rs.AddLayer("points")
+    rs.CurrentLayer("points")
+    for i in range(0, len(self.point_lists), 1):
+      for j in range(0, len(self.point_lists[i]), 1):
+        rs.AddPoint(self.point_lists[i][j])
+
+    for i in range(0, len(self.midpoints), 1):
+      rs.AddPoint(self.midpoints[i]);
 
   def points_from_ellipse(self, index):
     ellipse = self.cross_sections[index]
@@ -54,11 +91,6 @@ class PathLattice:
       points = self.points_from_ellipse(i)
       self.point_lists.append(points)
 
-  def add_text(self):
-    for i in range(0, len(self.point_lists)):
-      rs.AddText(str(i), self.cross_section_planes[i].Origin, 5)
-      for j in range(0, len(self.point_lists[i])):
-        rs.AddText(str(j), self.point_lists[i][j], 2)
 
   def points_for_lines(self):
     self.line_points = []
@@ -94,13 +126,14 @@ class PathLattice:
       crvTangent = crv[1]
       crvPerp = rs.VectorUnitize(crv[4])
       unit_vector = rs.VectorUnitize(crvTangent)
-      return [rs.VectorScale(unit_vector, 0.35), rs.VectorReverse(rs.VectorCrossProduct(crvTangent, crvPerp))]
+      return [rs.VectorScale(unit_vector, 0.205), rs.VectorReverse(rs.VectorCrossProduct(crvTangent, crvPerp))]
 
   def move_point_up(self, point, cross_section_index, point_index):
     offset_vectors = self.offset_vector(point, cross_section_index, point_index)
     normal = offset_vectors[0]
     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
     new_point = rs.PointAdd(point, normal)
+    self.midpoints.append(new_point)
     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
 
   def move_point_down(self, point, cross_section_index, point_index):
@@ -108,14 +141,18 @@ class PathLattice:
     normal = rs.VectorReverse(offset_vectors[0])
     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
     new_point = rs.PointAdd(point, normal)
+    self.midpoints.append(new_point)
     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
 
   def create_lines(self):
     self.line_lists = []
+    self.all_lines = []
     for i in range(0, len(self.line_points)):
       line_list = []
       for j in range(0, len(self.line_points[i]) - 1):
-        line_list.append(rs.AddLine(self.line_points[i][j], self.line_points[i][j + 1]))
+        curr_l = rs.AddLine(self.line_points[i][j], self.line_points[i][j + 1])
+        line_list.append(curr_l)
+        self.all_lines.append(curr_l)
       self.line_lists.append(line_list)
 
   def fillet_lines(self):

@@ -3,17 +3,17 @@ import math
 
 
 class PathLattice:
-  SAMPLES = 28
+  SAMPLES = 20
 
-  BEND_RADIUS = 2.5
+  BEND_RADIUS = 2
 
-  PERP_RADIUS = 2.5
+  PERP_RADIUS = 2
 
   POINTS_ON_CROSS_SECTION = 20
 
-  FLAT_LENGTH = 1
+  FLAT_LENGTH = 0.5
 
-  RADIUS_SCALAR = 1.75
+  RADIUS_SCALAR = 2
 
   def __init__(self):
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
@@ -28,22 +28,132 @@ class PathLattice:
     rs.DeleteObjects(self.brep)
 
   def create_jigs(self):
-    self.create_jig(self.line_lists[0])
+    for i in range(0, len(self.line_lists), 1):
+      jigs = self.create_jig(self.line_lists[i])
+      self.create_jig_connectors(jigs)
+      self.join_jigs(jigs)
 
   def create_jig(self, list):
+    jigs = []
     for i in range(0, len(list), 2):
       domain = rs.CurveDomain(list[i])
       start_point = rs.EvaluateCurve(list[i], domain[0])
       end_point = rs.EvaluateCurve(list[i], domain[1])
       start_plane = rs.PlaneFromNormal(start_point, rs.VectorUnitize(end_point - start_point))
       end_plane = rs.PlaneFromNormal(end_point, rs.VectorUnitize(start_point - end_point))
-      start_curve_point = rs.PlaneCurveIntersection(start_plane, self.curve_object)[0][1]
-      end_curve_point = rs.PlaneCurveIntersection(end_plane, self.curve_object)[0][1]
-      start_vector = rs.VectorScale(rs.VectorUnitize(rs.VectorCreate(start_point, start_curve_point)), 3)
-      end_vector = rs.VectorScale(rs.VectorUnitize(rs.VectorCreate(end_point, end_curve_point)), 3)
-      rs.AddPipe(rs.AddLine(rs.PointAdd(start_point, start_vector), rs.PointAdd(end_point, end_vector)), 0, 0.2375, 0, 1)
+      start_curve_point = self.closest_intersection(rs.PlaneCurveIntersection(start_plane, self.curve_object), start_point)
+      end_curve_point = self.closest_intersection(rs.PlaneCurveIntersection(end_plane, self.curve_object), end_point)
+      start_vector = rs.VectorUnitize(rs.VectorCreate(start_point, start_curve_point))
+      end_vector = rs.VectorUnitize(rs.VectorCreate(end_point, end_curve_point))
+      start_vector_scale = rs.VectorScale(start_vector, -5)
+      end_vector_scale = rs.VectorScale(end_vector, -5)
+      start_square = self.create_square(rs.PointAdd(start_point, start_vector_scale), rs.PointAdd(end_point, end_vector_scale), start_vector)
+      end_square = self.create_square(rs.PointAdd(end_point, end_vector_scale), rs.PointAdd(start_point, start_vector_scale), end_vector)
+      jigs.append(self.create_jig_section(start_square, end_square))
+    return jigs
+
+  def create_jig_section(self, start_square, end_square):
+    poly_line_1 = rs.AddPolyline([start_square[1][0], end_square[1][1], end_square[1][0], start_square[1][1], start_square[1][0]])
+    poly_line_2 = rs.AddPolyline([start_square[1][0], end_square[1][1], end_square[1][2], start_square[1][3], start_square[1][0]])
+    poly_line_3 = rs.AddPolyline([start_square[1][2], end_square[1][3], end_square[1][2], start_square[1][3], start_square[1][2]])
+    poly_line_4 = rs.AddPolyline([start_square[1][1], end_square[1][0], end_square[1][3], start_square[1][2], start_square[1][1]])
+    poly_line_5 = rs.AddPolyline([start_square[0][1], start_square[1][1], start_square[1][0], start_square[0][0], start_square[0][1]])
+    poly_line_6 = rs.AddPolyline([start_square[0][1], start_square[1][1], start_square[1][2], start_square[0][2], start_square[0][1]])
+    poly_line_7 = rs.AddPolyline([start_square[0][2], start_square[1][2], start_square[1][3], start_square[0][3], start_square[0][2]])
+    poly_line_8 = rs.AddPolyline([start_square[0][3], start_square[1][3], start_square[1][0], start_square[0][0], start_square[0][3]])
+    poly_line_9 = rs.AddPolyline([end_square[0][1], end_square[1][1], end_square[1][0], end_square[0][0], end_square[0][1]])
+    poly_line_10 = rs.AddPolyline([end_square[0][1], end_square[1][1], end_square[1][2], end_square[0][2], end_square[0][1]])
+    poly_line_11 = rs.AddPolyline([end_square[0][2], end_square[1][2], end_square[1][3], end_square[0][3], end_square[0][2]])
+    poly_line_12 = rs.AddPolyline([end_square[0][3], end_square[1][3], end_square[1][0], end_square[0][0], end_square[0][3]])
+    srf = rs.JoinSurfaces([
+      rs.AddPlanarSrf(poly_line_1),
+      rs.AddPlanarSrf(poly_line_2),
+      rs.AddPlanarSrf(poly_line_3),
+      rs.AddPlanarSrf(poly_line_4),
+      rs.AddPlanarSrf(poly_line_5),
+      rs.AddPlanarSrf(poly_line_6),
+      rs.AddPlanarSrf(poly_line_7),
+      rs.AddPlanarSrf(poly_line_8),
+      rs.AddPlanarSrf(poly_line_9),
+      rs.AddPlanarSrf(poly_line_10),
+      rs.AddPlanarSrf(poly_line_11),
+      rs.AddPlanarSrf(poly_line_12)
+    ], True)
+    return JigPiece(srf, start_square[0], end_square[0], start_square[2])
+
+  def create_square(self, start_point, end_point, start_vector):
+    across = rs.VectorUnitize(end_point - start_point)
+    up = rs.VectorScale(start_vector, 0.5)
+    over_unit = rs.VectorUnitize(rs.VectorCrossProduct(up, across))
+    over = rs.VectorScale((over_unit), 0.5)
+    points_inner = []
+    points_inner.append(rs.PointAdd(start_point, rs.VectorAdd(up, over)))
+    points_inner.append(rs.PointAdd(points_inner[0], rs.VectorReverse(over_unit)))
+    points_inner.append(rs.PointAdd(points_inner[1], rs.VectorReverse(start_vector)))
+    points_inner.append(rs.PointAdd(points_inner[2], over_unit))
+    points_outer = []
+    points_outer.append(rs.PointAdd(start_point, rs.VectorAdd(start_vector, over_unit)))
+    points_outer.append(rs.PointAdd(points_outer[0], rs.VectorScale(rs.VectorReverse(over_unit), 2)))
+    points_outer.append(rs.PointAdd(points_outer[1], rs.VectorScale(rs.VectorReverse(start_vector), 2)))
+    points_outer.append(rs.PointAdd(points_outer[2], rs.VectorScale(over_unit, 2)))
+    return [points_outer, points_inner, across]
+
+  def create_jig_connectors(self, jigs):
+    for i in range(0, len(jigs) -1, 1):
+      poly_line_1 = rs.AddPolyline([jigs[i].end_corners[0], jigs[i+1].start_corners[1], jigs[i+1].start_corners[0], jigs[i].end_corners[0]])
+      poly_line_2 = rs.AddPolyline([jigs[i].end_corners[1], jigs[i+1].start_corners[0], jigs[i].end_corners[0], jigs[i].end_corners[1]])
+      poly_line_3 = rs.AddPolyline([jigs[i].end_corners[1], jigs[i+1].start_corners[0], jigs[i+1].start_corners[3], jigs[i].end_corners[1]])
+      poly_line_4 = rs.AddPolyline([jigs[i].end_corners[2], jigs[i+1].start_corners[3], jigs[i].end_corners[1], jigs[i].end_corners[2]])
+      poly_line_5 = rs.AddPolyline([jigs[i].end_corners[2], jigs[i+1].start_corners[3], jigs[i+1].start_corners[2], jigs[i].end_corners[2]])
+      poly_line_6 = rs.AddPolyline([jigs[i].end_corners[3], jigs[i+1].start_corners[2], jigs[i].end_corners[2], jigs[i].end_corners[3]])
+      poly_line_7 = rs.AddPolyline([jigs[i].end_corners[3], jigs[i+1].start_corners[2], jigs[i].end_corners[0], jigs[i].end_corners[3]])
+      poly_line_8 = rs.AddPolyline([jigs[i].end_corners[0], jigs[i+1].start_corners[1], jigs[i+1].start_corners[2], jigs[i].end_corners[0]])
+      srf = rs.JoinSurfaces([
+        rs.AddPlanarSrf(poly_line_1),
+        rs.AddPlanarSrf(poly_line_2),
+        rs.AddPlanarSrf(poly_line_3),
+        rs.AddPlanarSrf(poly_line_4),
+        rs.AddPlanarSrf(poly_line_5),
+        rs.AddPlanarSrf(poly_line_6),
+        rs.AddPlanarSrf(poly_line_7),
+        rs.AddPlanarSrf(poly_line_8),
+      ], True)
+      jigs[i].addConnector(srf)
+      
+  def create_end_caps(self, corners, vector):
+    srf = rs.AddPolyline([
+      corners[0],
+      corners[1],
+      corners[2],
+      corners[3],
+      corners[0]
+    ])
+    curve = rs.AddCurve([corners[0], rs.PointAdd(corners[0], rs.VectorScale(vector, 3))])
+    return rs.AddSweep1(curve, [srf])
+
+  def join_jigs(self, jigs):
+    start_end = self.create_end_caps(jigs[0].start_corners, rs.VectorReverse(jigs[0].across))
+    end_end = self.create_end_caps(jigs[len(jigs) - 1].end_corners, jigs[len(jigs) - 1].across)
+    surfaces = [start_end]
+    for i in range(0, len(jigs), 1):
+      surfaces.append(jigs[i].srf)
+      if(i < len(jigs) - 1):
+        surfaces.append(jigs[i].connector)
+    surfaces.append(end_end)
+    surface = rs.JoinSurfaces(surfaces, True)
+    rs.CapPlanarHoles(surface)
+    print rs.IsObjectSolid(surface)
 
 
+  def closest_intersection(self, intersections, point):
+    closest_intersection = intersections[0][1]
+    length = rs.VectorLength(rs.VectorCreate(point, closest_intersection))
+    for i in range(0, len(intersections), 1):
+      new_length = rs.VectorLength(rs.VectorCreate(point, intersections[i][1]))
+      if length > new_length:
+        length = new_length
+        closest_intersection = intersections[i][1]
+    return closest_intersection
 
   def points_from_ellipse(self, index):
     ellipse = self.cross_sections[index]
@@ -219,6 +329,18 @@ class PathLattice:
         self.cross_section_planes.append(crosssectionplane)
       t +=  t_step#self.calc_step(t_step, pi_step)
       pi_step += pi_step_size
+
+class JigPiece:
+  def __init__(self, srf, start_corners, end_corners, across):
+    self.srf = srf
+    self.start_corners = start_corners
+    self.end_corners = end_corners
+    self.across = across
+
+  def addConnector(self, connector):
+    self.connector = connector
+
+
 
 rs.EnableRedraw(False)
 PathLattice()

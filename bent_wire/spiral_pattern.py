@@ -5,9 +5,9 @@ import math
 class PathLattice:
   SAMPLES = 15
 
-  BEND_RADIUS = 4
+  BEND_RADIUS = 2
 
-  PERP_RADIUS = 4
+  PERP_RADIUS = 2
 
   POINTS_ON_CROSS_SECTION = 20
 
