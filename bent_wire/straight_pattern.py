@@ -1,24 +1,26 @@
 import rhinoscriptsyntax as rs
 import math
-
+import re
+import json
 import os 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class PathLattice:
-  SAMPLES = 14
+  SAMPLES = 15
 
-  BEND_RADIUS = 2.2
+  BEND_RADIUS = 2
 
   PERP_RADIUS = 2
 
   POINTS_ON_CROSS_SECTION = 20
 
-  FLAT_LENGTH = 0.6
+  FLAT_LENGTH = 0.5
 
-  RADIUS_SCALAR = 1.8
+  RADIUS_SCALAR = 1.9
 
   def __init__(self):
     self.midpoints = []
+    self.partsHash = {}
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
     self.outFile = rs.GetString('Input a name for the length file')
     self.create_cross_sections()
@@ -27,12 +29,12 @@ class PathLattice:
     # self.add_text()
     self.points_for_lines()
     self.create_lines()
-    self.label_and_len_lines();
-    # self.fillet_lines()
-    # self.pipe_lines()
-    self.delete_cross_sections()
+    self.label_and_len_lines()
     rs.DeleteObjects(self.brep)
     self.draw_points()
+    f = open('{0}.json'.format(self.outFile), 'w')
+    f.write(json.dumps(self.partsHash))
+    f.close()
 
   def add_text(self):
     for i in range(0, len(self.point_lists)):
@@ -41,19 +43,111 @@ class PathLattice:
         rs.AddText(str(j), self.point_lists[i][j], 2)
 
   def label_and_len_lines(self):
-    f = open('{0}/{1}.txt'.format(dir_path, self.outFile), 'w')
-    dists = []
+    # f = open('{0}/{1}.txt'.format(dir_path, self.outFile), 'w')
+    # dists = []
     for i in range(0, len(self.all_lines)):
       curr_len = rs.CurveLength(self.all_lines[i])
+      # rs.AddPipe(self.all_lines[i], 0, 0.09375, 0, 1)
       if math.fabs(curr_len - self.FLAT_LENGTH) > 0.000001:
-        dists.append('%.3f' % curr_len)
+        # dists.append('%.3f' % curr_len)
         mp = rs.CurveMidPoint(self.all_lines[i])
-        rs.AddText('line{0}'.format(i), mp, 0.3)
-        f.write('line{0}: {1}\n'.format(i, curr_len))
-        rs.AddPipe(self.all_lines[i], 0, 0.09375, 0, 1)
-    f.close()
-    print(set(dists))
+        text = 'line{0}'.format(i)
+        rs.AddText(text, mp, 0.3)
+        start = rs.AddLine(rs.CurveStartPoint(self.all_lines[i-1]), rs.CurveEndPoint(self.all_lines[i-1]))
+        mid = rs.AddLine(rs.CurveStartPoint(self.all_lines[i]), rs.CurveEndPoint(self.all_lines[i]))
+        end = rs.AddLine(rs.CurveStartPoint(self.all_lines[i+1]), rs.CurveEndPoint(self.all_lines[i+1]))
+        self.createPipe(start, mid, end, text)
+        # f.write('line{0}: {1}\n'.format(i, curr_len))
+    # f.close()
+    # dists = list(set(dists)) #hacky unique
+    # for i in range(0, len(dists)):
+      # point1 = rs.AddPoint(i/3.0, 0, 0)
+      # point2 = rs.AddPoint(i/3.0, float(dists[i]), 0)
+      # rs.AddLine(point1, point2)
+
+  def createPipe(self, first, mid, last, text):
+    first_fillet = rs.AddFilletCurve(first, mid, 0.25)
+    fillet_points = rs.CurveFilletPoints(first, mid, 0.25)
+    first_circle = rs.AddCircle(fillet_points[2], 0.125)
+    first_cp = rs.CurveClosestPoint(first, fillet_points[0])
+    first_domain = rs.CurveDomain(first) 
+    nfirst = rs.TrimCurve(first, (first_domain[0], first_cp), False)
+    second_cp = rs.CurveClosestPoint(mid, fillet_points[1])
+    second_domain = rs.CurveDomain(mid)
+    nmid = rs.TrimCurve(mid, (second_cp, second_domain[1]), False)
     
+    second_fillet = rs.AddFilletCurve(mid, last, 0.25)
+    fillet_points = rs.CurveFilletPoints(mid, last, 0.25)
+    second_circle = rs.AddCircle(fillet_points[2], 0.125)
+    first_cp = rs.CurveClosestPoint(mid, fillet_points[0])
+    first_domain = rs.CurveDomain(mid)
+    nmid = rs.TrimCurve(nmid, (first_domain[0], first_cp), False)
+    second_cp = rs.CurveClosestPoint(last, fillet_points[1])
+    second_domain = rs.CurveDomain(last)
+    nlast = rs.TrimCurve(last, (second_cp, second_domain[1]), False)
+
+    curve = rs.JoinCurves([nfirst, first_fillet, nmid, second_fillet, nlast])
+    print curve
+    pipe = rs.AddPipe(curve, 0, 0.09375, 0, 1)
+    points = [
+      rs.CurveStartPoint(first),
+      rs.CurveEndPoint(first),
+      rs.CurveStartPoint(last),
+      rs.CurveEndPoint(last)
+    ]
+    self.copyAndMover(first, mid, last, points, text)
+    # rs.AddPipe(first_fillet, 0, 0.09375, 0, 1)
+    # rs.AddPipe(mid, 0, 0.09375, 0, 1)
+    # rs.AddPipe(second_fillet, 0, 0.09375, 0, 1)
+    # rs.AddPipe(last, 0, 0.09375, 0, 1)
+
+  def copyAndMover(self, first, mid, last, points, text):
+    plane = rs.PlaneFromPoints(points[0], points[1], points[2])
+    uv1 = rs.PlaneClosestPoint(plane, points[1], False)
+    uv2 = rs.PlaneClosestPoint(plane, points[2], False)
+    distHor = abs(uv1[0] - uv2[0])
+    distVert = abs(uv1[1] - uv2[1])
+    key = 'len{0}{1}'.format(distHor, distVert)
+    key = re.sub(r'\.', '', key)
+    if key in self.partsHash:
+      self.partsHash[key].append(text)
+    else:
+      self.partsHash[key] = []
+      self.partsHash[key].append(text)
+      ypos = len(self.partsHash.keys()) + len(self.partsHash.keys())
+      rs.AddText(key, [0, ypos, 0], 0.3)
+      newPoints = [
+        rs.AddPoint(0, ypos, 0),
+        rs.AddPoint(self.FLAT_LENGTH, ypos, 0),
+        rs.AddPoint(self.FLAT_LENGTH + distHor, ypos + distVert, 0),
+        rs.AddPoint((self.FLAT_LENGTH * 2) + distHor, ypos + distVert, 0)
+      ]
+      first = rs.OrientObject(first, points, newPoints, 1)
+      mid = rs.OrientObject(mid, points, newPoints, 1)
+      last = rs.OrientObject(last, points, newPoints, 1)
+      first_fillet = rs.AddFilletCurve(first, mid, 0.09375)
+      fillet_points = rs.CurveFilletPoints(first, mid, 0.09375)
+      first_circle = rs.AddCircle(fillet_points[2], 0.09375)
+      first_cp = rs.CurveClosestPoint(first, fillet_points[0])
+      first_domain = rs.CurveDomain(first) 
+      first = rs.TrimCurve(first, (first_domain[0], first_cp), True)
+      second_cp = rs.CurveClosestPoint(mid, fillet_points[1])
+      second_domain = rs.CurveDomain(mid)
+      mid = rs.TrimCurve(mid, (second_cp, second_domain[1]), True)
+      
+      second_fillet = rs.AddFilletCurve(mid, last, 0.09375)
+      fillet_points = rs.CurveFilletPoints(mid, last, 0.09375)
+      second_circle = rs.AddCircle(fillet_points[2], 0.09375)
+      first_cp = rs.CurveClosestPoint(mid, fillet_points[0])
+      first_domain = rs.CurveDomain(mid)
+      mid = rs.TrimCurve(mid, (first_domain[0], first_cp), True)
+      second_cp = rs.CurveClosestPoint(last, fillet_points[1])
+      second_domain = rs.CurveDomain(last)
+      last = rs.TrimCurve(last, (second_cp, second_domain[1]), True)
+      curve = rs.JoinCurves([first, first_fillet, mid, second_fillet, last])
+
+      rs.AddCircle([0, ypos - 0.125 - 0.09375, 0], 0.09375)
+      rs.AddCircle([(self.FLAT_LENGTH * 2) + distHor, ypos + distVert + 0.125 + 0.09375, 0], 0.09375)
 
 
   def draw_points(self):
@@ -143,6 +237,47 @@ class PathLattice:
     new_point = rs.PointAdd(point, normal)
     self.midpoints.append(new_point)
     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
+
+  # def offset_vector(self, point, cross_section_index, point_index):
+  #     modulo = len(self.point_lists[cross_section_index - 1])
+  #     prev_point_1 = self.point_lists[cross_section_index - 1][(point_index - 2) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][(point_index - 1) % modulo]
+  #     prev_point_2 = self.point_lists[cross_section_index - 1][(point_index - 1) % modulo] if cross_section_index % 2 == 0 else self.point_lists[cross_section_index - 1][point_index]
+  #     in_between_vector = rs.VectorAdd(rs.VectorCreate(prev_point_1, point), rs.VectorCreate(prev_point_2, point))
+  #     normal_vector = rs.SurfaceNormal(self.brep, rs.SurfaceClosestPoint(self.brep, point))
+  #     plane = rs.PlaneFromFrame(point, in_between_vector, normal_vector)
+  #     vector = rs.SurfaceNormal(rs.AddPlaneSurface(plane, 1, 1), [0,0])
+  #     unit_vector = rs.VectorUnitize(vector)
+  #     return [rs.VectorScale(unit_vector, 0.205), in_between_vector]
+
+  # def move_point_up(self, point, cross_section_index, point_index):
+  #   if(cross_section_index > 0):
+  #     offset_vectors = self.offset_vector(point, cross_section_index, point_index)
+  #     normal = offset_vectors[0]
+  #     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+  #     new_point = rs.PointAdd(point, normal)
+  #     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
+  #   else:
+  #     curve = self.cross_sections[cross_section_index]
+  #     parameter = rs.CurveClosestPoint(curve, point)
+  #     tangent = rs.CurveTangent(curve, parameter)
+  #     unit_vector = rs.VectorUnitize(tangent)
+  #     scale_vector = rs.VectorScale(unit_vector, self.FLAT_LENGTH/2)
+  #     return [rs.PointAdd(point, scale_vector)]
+
+  # def move_point_down(self, point, cross_section_index, point_index):
+  #   if(cross_section_index > 0):
+  #     offset_vectors = self.offset_vector(point, cross_section_index, point_index)
+  #     normal = rs.VectorReverse(offset_vectors[0])
+  #     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+  #     new_point = rs.PointAdd(point, normal)
+  #     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
+  #   else:
+  #     curve = self.cross_sections[cross_section_index]
+  #     parameter = rs.CurveClosestPoint(curve, point)
+  #     tangent = rs.CurveTangent(curve, parameter)
+  #     unit_vector = rs.VectorUnitize(tangent)
+  #     scale_vector = rs.VectorReverse(rs.VectorScale(unit_vector, self.FLAT_LENGTH/2))
+  #     return [rs.PointAdd(point, scale_vector)]
 
   def create_lines(self):
     self.line_lists = []
