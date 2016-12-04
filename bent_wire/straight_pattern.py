@@ -6,11 +6,6 @@ import os
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class PathLattice:
-  SAMPLES = 15
-
-  BEND_RADIUS = 2
-
-  PERP_RADIUS = 2.5
 
   POINTS_ON_CROSS_SECTION = 20
 
@@ -18,17 +13,22 @@ class PathLattice:
     self.midpoints = []
     self.partsHash = {}
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
+    self.SAMPLES = rs.GetReal("Set number of cross sections", 15)
+    self.POINTS_ON_CROSS_SECTION = rs.GetReal("Set nodes per cross section", 10) * 2
     self.flat_length = rs.GetReal('Set flat length', 1.5)
+    self.BEND_RADIUS = rs.GetReal('set x radius', 2)
+    self.PERP_RADIUS = rs.GetReal('set y radius', 2.5)
     self.RADIUS_SCALAR = rs.GetReal('Set radius scale', 2.5)
     self.distance_apart = rs.GetReal('Set distance apart for flats', 1)
-    self.outFile = rs.GetString('Input a name for the length file')
     self.create_cross_sections()
     self.brep = rs.AddLoftSrf(self.cross_sections)
     self.points_from_cross()
     # self.add_text()
     self.points_for_lines()
     self.create_lines()
-    self.label_and_len_lines()
+    self.fillet_lines()
+    self.pipe_lines()
+    # self.label_and_len_lines()
     rs.DeleteObjects(self.brep)
     self.draw_points()
 
@@ -81,58 +81,11 @@ class PathLattice:
       rs.CurveEndPoint(last)
     ]
     self.copyAndMover(first, mid, last, points, text)
-    # rs.AddPipe(first_fillet, 0, 0.09375, 0, 1)
-    # rs.AddPipe(mid, 0, 0.09375, 0, 1)
-    # rs.AddPipe(second_fillet, 0, 0.09375, 0, 1)
-    # rs.AddPipe(last, 0, 0.09375, 0, 1)
+    rs.AddPipe(first_fillet, 0, 0.09375, 0, 1)
+    rs.AddPipe(mid, 0, 0.09375, 0, 1)
+    rs.AddPipe(second_fillet, 0, 0.09375, 0, 1)
+    rs.AddPipe(last, 0, 0.09375, 0, 1)
 
-  def copyAndMover(self, first, mid, last, points, text):
-    plane = rs.PlaneFromPoints(points[0], points[1], points[2])
-    uv1 = rs.PlaneClosestPoint(plane, points[1], False)
-    uv2 = rs.PlaneClosestPoint(plane, points[2], False)
-    distHor = abs(uv1[0] - uv2[0])
-    distVert = abs(uv1[1] - uv2[1])
-    key = 'len{0}{1}'.format(distHor, distVert)
-    key = re.sub(r'\.', '', key)
-    if key in self.partsHash:
-      self.partsHash[key].append(text)
-    else:
-      self.partsHash[key] = []
-      self.partsHash[key].append(text)
-      ypos = len(self.partsHash.keys()) + len(self.partsHash.keys())
-      rs.AddText(key, [0, ypos, 0], 0.3)
-      newPoints = [
-        rs.AddPoint(0, ypos, 0),
-        rs.AddPoint(self.flat_length, ypos, 0),
-        rs.AddPoint(self.flat_length + distHor, ypos + distVert, 0),
-        rs.AddPoint((self.flat_length * 2) + distHor, ypos + distVert, 0)
-      ]
-      first = rs.OrientObject(first, points, newPoints, 1)
-      mid = rs.OrientObject(mid, points, newPoints, 1)
-      last = rs.OrientObject(last, points, newPoints, 1)
-      first_fillet = rs.AddFilletCurve(first, mid, 0.09375)
-      fillet_points = rs.CurveFilletPoints(first, mid, 0.09375)
-      first_circle = rs.AddCircle(fillet_points[2], 0.09375)
-      first_cp = rs.CurveClosestPoint(first, fillet_points[0])
-      first_domain = rs.CurveDomain(first) 
-      first = rs.TrimCurve(first, (first_domain[0], first_cp), True)
-      second_cp = rs.CurveClosestPoint(mid, fillet_points[1])
-      second_domain = rs.CurveDomain(mid)
-      mid = rs.TrimCurve(mid, (second_cp, second_domain[1]), True)
-      
-      second_fillet = rs.AddFilletCurve(mid, last, 0.09375)
-      fillet_points = rs.CurveFilletPoints(mid, last, 0.09375)
-      second_circle = rs.AddCircle(fillet_points[2], 0.09375)
-      first_cp = rs.CurveClosestPoint(mid, fillet_points[0])
-      first_domain = rs.CurveDomain(mid)
-      mid = rs.TrimCurve(mid, (first_domain[0], first_cp), True)
-      second_cp = rs.CurveClosestPoint(last, fillet_points[1])
-      second_domain = rs.CurveDomain(last)
-      last = rs.TrimCurve(last, (second_cp, second_domain[1]), True)
-      curve = rs.JoinCurves([first, first_fillet, mid, second_fillet, last])
-
-      rs.AddCircle([0, ypos - 0.125 - 0.09375, 0], 0.09375)
-      rs.AddCircle([(self.flat_length * 2) + distHor, ypos + distVert + 0.125 + 0.09375, 0], 0.09375)
 
 
   def draw_points(self):
