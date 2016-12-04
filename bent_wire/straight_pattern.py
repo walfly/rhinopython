@@ -10,18 +10,17 @@ class PathLattice:
 
   BEND_RADIUS = 2
 
-  PERP_RADIUS = 2
+  PERP_RADIUS = 2.5
 
   POINTS_ON_CROSS_SECTION = 20
-
-  FLAT_LENGTH = 0.5
-
-  RADIUS_SCALAR = 1.9
 
   def __init__(self):
     self.midpoints = []
     self.partsHash = {}
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
+    self.flat_length = rs.GetReal('Set flat length', 1.5)
+    self.RADIUS_SCALAR = rs.GetReal('Set radius scale', 2.5)
+    self.distance_apart = rs.GetReal('Set distance apart for flats', 1)
     self.outFile = rs.GetString('Input a name for the length file')
     self.create_cross_sections()
     self.brep = rs.AddLoftSrf(self.cross_sections)
@@ -32,9 +31,6 @@ class PathLattice:
     self.label_and_len_lines()
     rs.DeleteObjects(self.brep)
     self.draw_points()
-    f = open('{0}.json'.format(self.outFile), 'w')
-    f.write(json.dumps(self.partsHash))
-    f.close()
 
   def add_text(self):
     for i in range(0, len(self.point_lists)):
@@ -43,13 +39,9 @@ class PathLattice:
         rs.AddText(str(j), self.point_lists[i][j], 2)
 
   def label_and_len_lines(self):
-    # f = open('{0}/{1}.txt'.format(dir_path, self.outFile), 'w')
-    # dists = []
     for i in range(0, len(self.all_lines)):
       curr_len = rs.CurveLength(self.all_lines[i])
-      # rs.AddPipe(self.all_lines[i], 0, 0.09375, 0, 1)
-      if math.fabs(curr_len - self.FLAT_LENGTH) > 0.000001:
-        # dists.append('%.3f' % curr_len)
+      if math.fabs(curr_len - self.flat_length) > 0.000001:
         mp = rs.CurveMidPoint(self.all_lines[i])
         text = 'line{0}'.format(i)
         rs.AddText(text, mp, 0.3)
@@ -57,13 +49,6 @@ class PathLattice:
         mid = rs.AddLine(rs.CurveStartPoint(self.all_lines[i]), rs.CurveEndPoint(self.all_lines[i]))
         end = rs.AddLine(rs.CurveStartPoint(self.all_lines[i+1]), rs.CurveEndPoint(self.all_lines[i+1]))
         self.createPipe(start, mid, end, text)
-        # f.write('line{0}: {1}\n'.format(i, curr_len))
-    # f.close()
-    # dists = list(set(dists)) #hacky unique
-    # for i in range(0, len(dists)):
-      # point1 = rs.AddPoint(i/3.0, 0, 0)
-      # point2 = rs.AddPoint(i/3.0, float(dists[i]), 0)
-      # rs.AddLine(point1, point2)
 
   def createPipe(self, first, mid, last, text):
     first_fillet = rs.AddFilletCurve(first, mid, 0.25)
@@ -118,9 +103,9 @@ class PathLattice:
       rs.AddText(key, [0, ypos, 0], 0.3)
       newPoints = [
         rs.AddPoint(0, ypos, 0),
-        rs.AddPoint(self.FLAT_LENGTH, ypos, 0),
-        rs.AddPoint(self.FLAT_LENGTH + distHor, ypos + distVert, 0),
-        rs.AddPoint((self.FLAT_LENGTH * 2) + distHor, ypos + distVert, 0)
+        rs.AddPoint(self.flat_length, ypos, 0),
+        rs.AddPoint(self.flat_length + distHor, ypos + distVert, 0),
+        rs.AddPoint((self.flat_length * 2) + distHor, ypos + distVert, 0)
       ]
       first = rs.OrientObject(first, points, newPoints, 1)
       mid = rs.OrientObject(mid, points, newPoints, 1)
@@ -147,7 +132,7 @@ class PathLattice:
       curve = rs.JoinCurves([first, first_fillet, mid, second_fillet, last])
 
       rs.AddCircle([0, ypos - 0.125 - 0.09375, 0], 0.09375)
-      rs.AddCircle([(self.FLAT_LENGTH * 2) + distHor, ypos + distVert + 0.125 + 0.09375, 0], 0.09375)
+      rs.AddCircle([(self.flat_length * 2) + distHor, ypos + distVert + 0.125 + 0.09375, 0], 0.09375)
 
 
   def draw_points(self):
@@ -220,12 +205,12 @@ class PathLattice:
       crvTangent = crv[1]
       crvPerp = rs.VectorUnitize(crv[4])
       unit_vector = rs.VectorUnitize(crvTangent)
-      return [rs.VectorScale(unit_vector, 0.205), rs.VectorReverse(rs.VectorCrossProduct(crvTangent, crvPerp))]
+      return [rs.VectorScale(unit_vector, self.distance_apart/2), rs.VectorReverse(rs.VectorCrossProduct(crvTangent, crvPerp))]
 
   def move_point_up(self, point, cross_section_index, point_index):
     offset_vectors = self.offset_vector(point, cross_section_index, point_index)
     normal = offset_vectors[0]
-    scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+    scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.flat_length/2)
     new_point = rs.PointAdd(point, normal)
     self.midpoints.append(new_point)
     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
@@ -233,7 +218,7 @@ class PathLattice:
   def move_point_down(self, point, cross_section_index, point_index):
     offset_vectors = self.offset_vector(point, cross_section_index, point_index)
     normal = rs.VectorReverse(offset_vectors[0])
-    scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+    scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.flat_length/2)
     new_point = rs.PointAdd(point, normal)
     self.midpoints.append(new_point)
     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
@@ -253,7 +238,7 @@ class PathLattice:
   #   if(cross_section_index > 0):
   #     offset_vectors = self.offset_vector(point, cross_section_index, point_index)
   #     normal = offset_vectors[0]
-  #     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+  #     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.flat_length/2)
   #     new_point = rs.PointAdd(point, normal)
   #     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
   #   else:
@@ -261,14 +246,14 @@ class PathLattice:
   #     parameter = rs.CurveClosestPoint(curve, point)
   #     tangent = rs.CurveTangent(curve, parameter)
   #     unit_vector = rs.VectorUnitize(tangent)
-  #     scale_vector = rs.VectorScale(unit_vector, self.FLAT_LENGTH/2)
+  #     scale_vector = rs.VectorScale(unit_vector, self.flat_length/2)
   #     return [rs.PointAdd(point, scale_vector)]
 
   # def move_point_down(self, point, cross_section_index, point_index):
   #   if(cross_section_index > 0):
   #     offset_vectors = self.offset_vector(point, cross_section_index, point_index)
   #     normal = rs.VectorReverse(offset_vectors[0])
-  #     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.FLAT_LENGTH/2)
+  #     scaled_offset = rs.VectorScale(rs.VectorUnitize(offset_vectors[1]), self.flat_length/2)
   #     new_point = rs.PointAdd(point, normal)
   #     return [rs.PointAdd(new_point, scaled_offset), rs.PointAdd(new_point, rs.VectorReverse(scaled_offset))]
   #   else:
@@ -276,7 +261,7 @@ class PathLattice:
   #     parameter = rs.CurveClosestPoint(curve, point)
   #     tangent = rs.CurveTangent(curve, parameter)
   #     unit_vector = rs.VectorUnitize(tangent)
-  #     scale_vector = rs.VectorReverse(rs.VectorScale(unit_vector, self.FLAT_LENGTH/2))
+  #     scale_vector = rs.VectorReverse(rs.VectorScale(unit_vector, self.flat_length/2))
   #     return [rs.PointAdd(point, scale_vector)]
 
   def create_lines(self):
