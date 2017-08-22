@@ -8,39 +8,14 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 
 POINTS_ON_CROSS_SECTION = rs.GetReal("Set nodes per cross section", 10) * 2
 should_spiral = rs.GetBoolean('Spiral Pattern?',('spiral', 'no', 'yes'), (True))
+DISC_RADIUS = 0.125
+MATERIAL_THICKNESS = 0.125
 
 def size_vector(vector, number):
     return rs.VectorScale(rs.VectorUnitize(vector), number)
 
-def square_pipe(curve, plane, point, index):
-    c1 = rs.CopyObject(curve)
-    c2 = rs.CopyObject(curve)
-    s = rs.CurveStartPoint(curve)
-    dblParam = rs.CurveClosestPoint(curve, s)
-    pp = rs.CurvePerpFrame(curve, dblParam)
-    inter = rs.PlanePlaneIntersection(plane, pp)
-    vec = rs.VectorCreate(inter[0], inter[1])
-    uvz = rs.VectorUnitize(plane.ZAxis)
-    uvz = rs.VectorScale(uvz, 0.125)
-    if index % 2 == 0:
-        uvz = rs.VectorReverse(uvz)
-    uvy = rs.VectorUnitize(vec)
-    uvy = rs.VectorScale(uvy, 0.0625)
-    rs.MoveObject(c1, uvy)
-    rs.MoveObject(c2, rs.VectorReverse(uvy))
-    s1 = rs.CurveStartPoint(c1)
-    s2 = rs.CurveStartPoint(c2)
-
-    p1 = rs.PointAdd(s1, uvz)
-    p2 = rs.PointAdd(s2, uvz)
-
-    l1 = rs.AddLine(s1, p1)
-    l2 = rs.AddLine(s2, p2)
-    s1 = rs.ExtrudeCurve(c1, l1)
-    s2 = rs.ExtrudeCurve(c2, l2)
-
-    return [s1, s2, c1,c2]
-
+def perp_to_two(vector1, vector2):
+    return rs.VectorCrossProduct(vector1, vector2)
 
 def receiverSrf(nextpartpoint, c1, c2):
     ps1 = rs.PolylineVertices(c1)
@@ -80,154 +55,186 @@ class JointPiece:
     rs.AddText("point2", self.point2, 0.25)
     rs.AddText("point3", self.point3, 0.25)
     rs.AddText("point4", self.point4, 0.25)
-    self.c1 = rs.AddCircle(self.p1, 0.25)
-    self.c2 = rs.AddCircle(self.p2, 0.25)
-    self.c3 = rs.AddCircle(self.p3, 0.25)
-    self.c4 = rs.AddCircle(self.p4, 0.25)
+    self.c1 = rs.AddCircle(self.p1, DISC_RADIUS)
+    self.c2 = rs.AddCircle(self.p2, DISC_RADIUS)
+    self.c3 = rs.AddCircle(self.p3, DISC_RADIUS)
+    self.c4 = rs.AddCircle(self.p4, DISC_RADIUS)
 
-  def buildDiscs(self, p1, c1, forward, three):
-    w = -0.25
-    h = -0.25
-    if forward:
-        w = 0.25
-        h = 0.25
-    if three:
-        w = -0.25
-        h = 0.25
-    rect = rs.AddRectangle(p1, w, h)
-    points = rs.PolylineVertices(rect)
-    sp = points[0]
-    fp = points[3]
-    ep = points[1]
-    if forward:
-        sp = points[2]
-    if three:
-        sp = points[3]
-        fp = points[0]
-        ep = points[2]
-    l1 = rs.AddLine(sp, ep)
-    l2 = rs.AddLine(sp, fp)
-    inter1 = rs.CurveCurveIntersection(c1, l1)[0][5]
-    inter2 = rs.CurveCurveIntersection(c1, l2)[0][5]
-    if forward or three:
-        tmp = inter1
-        inter1 = inter2
-        inter2 = tmp
-    c1 = rs.TrimCurve(c1, (inter1, inter2))
-    fill = rs.AddFilletCurve(l1, l2, radius=0.125)
-    inter1 = rs.CurveCurveIntersection(l1, fill)[0][5]
-    inter2 = rs.CurveCurveIntersection(l2, fill)[0][5]
-    l1 = rs.TrimCurve(l1, (inter1, 0))
-    l2 = rs.TrimCurve(l2, (inter2, 0))
-    rs.DeleteObjects(rect)
-    fillet = rs.JoinCurves([l1, fill, l2])
-    filletc = rs.CopyObject(fillet)
-    return [rs.JoinCurves([fillet, c1], delete_input=True), filletc]
 
-  def cutJoints(self, c, srf, forward):
-    inter1 = rs.CurveCurveIntersection(c, srf[2])[0]
-    inter2 = rs.CurveCurveIntersection(c, srf[3])[0]
-    cc = rs.CopyObject(c)
-    c = rs.TrimCurve(c, (inter1[5], inter2[5]))
-    if rs.CurveLength(c) < 0.15:
-        rs.DeleteObjects([c])
-        c = rs.TrimCurve(cc, (inter2[5], inter1[5]))
-    poly1 = rs.PolylineVertices(srf[2])
-    poly2 = rs.PolylineVertices(srf[3])
-    point1 = inter1[1]
-    point4 = inter2[1]
-    point2 = poly1[len(poly1) - 1]
-    point3 = poly2[len(poly2) - 1]
-    if forward:
-        point2 = poly1[0]
-        point3 = poly2[0]
-    vec = rs.VectorCreate(point2, point1)
-    l1 = rs.AddLine(point1, point2)
-    arc = rs.AddArcPtTanPt(point2, vec, point3)
-    l2 = rs.AddLine(point3, point4)
-    return rs.JoinCurves([c, l1, arc, l2])
+  def createRec(self, p1, p2):
+    perpVec = size_vector(perp_to_two(p1.ZAxis, rs.VectorCreate(p2.Origin, p1.Origin)), DISC_RADIUS)
+    perpVec2 = rs.VectorReverse(perpVec)
+    corner1 = rs.VectorAdd(p1.Origin, perpVec)
+    corner2 = rs.VectorAdd(p1.Origin, perpVec2)
+    corner3 = rs.VectorAdd(p2.Origin, perpVec2)
+    corner4 = rs.VectorAdd(p2.Origin, perpVec)
+    return [corner1, corner2, corner3, corner4];
 
-  def extrudeJoint(self, c, p, forward):
-    point = p.Origin
-    v = rs.VectorUnitize(p.ZAxis)
-    v = rs.VectorScale(v, 0.125)
-    if self.index % 2 == 0:
-        if forward:
-            v = rs.VectorReverse(v)
+  def createArcs(self, rec1, rec2):
+    tan = rs.CurveTangent(self.c1, rs.CurveClosestPoint(self.c1, rec1[1]))
+    arc1 = rs.AddArcPtTanPt(rec1[1], tan, rec2[1])
+    tan = rs.CurveTangent(self.c1, rs.CurveClosestPoint(self.c1, rec1[0]))
+    arc2 = rs.AddArcPtTanPt(rec1[0], rs.VectorReverse(tan), rec2[2])
+    tan = rs.CurveTangent(self.c4, rs.CurveClosestPoint(self.c4, rec1[2]))
+    arc3 = rs.AddArcPtTanPt(rec1[2], tan, rec2[0])
+    tan = rs.CurveTangent(self.c4, rs.CurveClosestPoint(self.c4, rec1[3]))
+    arc4 = rs.AddArcPtTanPt(rec1[3], rs.VectorReverse(tan), rec2[3])
+    return [arc1, arc2, arc3, arc4]
+
+  def cutSlots(self, circ, inter, p, rev):
+    perpVec = size_vector(perp_to_two(p.ZAxis, rs.VectorCreate(p.Origin, inter)), MATERIAL_THICKNESS/2)
+    perpVec2 = rs.VectorReverse(perpVec)
+    vec = size_vector(rs.VectorCreate(p.Origin, inter), DISC_RADIUS)
+    if rev:
+        inter = rs.VectorAdd(p.Origin, vec)
+        vec = rs.VectorReverse(vec)
+    p1 = rs.VectorAdd(inter, perpVec)
+    p2 = rs.VectorAdd(p1, vec)
+    p3 = rs.VectorAdd(inter, perpVec2)
+    p4 = rs.VectorAdd(p3, vec)
+    arc = rs.AddArcPtTanPt(p2, rs.VectorCreate(p2,p1), p4)
+    l1 = rs.AddLine(p1, p2)
+    l2 = rs.AddLine(p3, p4)
+    inter1 = rs.CurveCurveIntersection(l1, circ)[0]
+    inter2 = rs.CurveCurveIntersection(l2, circ)[0]
+    if rev:
+        circ = rs.TrimCurve(circ, (inter1[7], inter2[7]))
     else:
-        if not forward:
-            v = rs.VectorReverse(v)
-    p2 = rs.PointAdd(point, v)
-    l = rs.AddLine(point, p2)
-    srf = rs.CapPlanarHoles(rs.ExtrudeCurve(c, l))
-    return srf
+        circ = rs.TrimCurve(circ, (inter2[7], inter1[7]))
+    l1 = rs.TrimCurve(l1, (inter1[5], 0))
+    l2 = rs.TrimCurve(l2, (inter2[5], 0))
+    return rs.JoinCurves([circ, l1, l2, arc], delete_input=True)
 
-  def buildConnector(self):
-    [self.c1, self.fillet1] = self.buildDiscs(self.p1, self.c1, False, False)
-    [self.c2, self.fillet2] = self.buildDiscs(self.p2, self.c2, True, False)
-    [self.c3, self.fillet3] = self.buildDiscs(self.p3, self.c3, False, True)
-    [self.c4, self.fillet4] = self.buildDiscs(self.p4, self.c4, True, False)
-    self.blank1 = rs.CopyObject(self.c1)
-    self.blank2 = rs.CopyObject(self.c2)
-    self.blank3 = rs.CopyObject(self.c3)
-    self.blank4 = rs.CopyObject(self.c4)
-    if hasattr(self, 'srf1'):
-        self.c1 = self.cutJoints(self.c1, self.srf1, False)
-    if hasattr(self, 'srf3'):
-        self.c3 = self.cutJoints(self.c3, self.srf3, False)
-    if hasattr(self, 'srf2'):
-        self.c2 = self.cutJoints(self.c2, self.srf2, True)
-    if hasattr(self, 'srf4'):
-        self.c4 = self.cutJoints(self.c4, self.srf4, True)
-    self.jointsrf1 = self.extrudeJoint(self.c1, self.p1, False)
-    self.jointsrf2 = self.extrudeJoint(self.c2, self.p2, True)
-    self.jointsrf3 = self.extrudeJoint(self.c3, self.p3, False)
-    self.jointsrf4 = self.extrudeJoint(self.c4, self.p4, True)
-    self.base = self.buildBase()
+  def connectToNext(self, p, pv, cv, np, npv, ncv):
+    vec1 = size_vector(rs.VectorCreate(np.Origin, p.Origin), 0.4)
+    perpVec1 = size_vector(perp_to_two(vec1, pv.ZAxis), DISC_RADIUS)
+    sp1 = rs.VectorAdd(pv.Origin, perpVec1);
+    sp2 = rs.VectorAdd(pv.Origin, rs.VectorReverse(perpVec1));
+    sp3 = rs.VectorAdd(sp1, vec1)
+    sp4 = rs.VectorAdd(sp2, vec1)
+    sp5 = rs.VectorAdd(sp4, size_vector(perpVec1, DISC_RADIUS - (MATERIAL_THICKNESS/2)))
+    sp6 = rs.VectorAdd(sp3, size_vector(rs.VectorReverse(perpVec1), DISC_RADIUS - (MATERIAL_THICKNESS/2)))
+    sp7 = rs.VectorAdd(sp5, size_vector(rs.VectorReverse(vec1), 0.2))
+    sp8 = rs.VectorAdd(sp6, size_vector(rs.VectorReverse(vec1), 0.2))
+    basePoint = rs.VectorAdd(sp7, size_vector(perpVec1, MATERIAL_THICKNESS/2))
+    basePoint = rs.AddPoint(basePoint)
+    dom1 = rs.CurveClosestPoint(cv, sp1)
+    dom2 = rs.CurveClosestPoint(cv, sp2)
+    conn = rs.JoinCurves([
+        rs.TrimCurve(cv, (dom2, dom1)),
+        rs.AddArcPtTanPt(sp7, rs.VectorReverse(vec1), sp8),
+        rs.AddPolyline([sp1, sp3, sp6, sp8]),
+        rs.AddPolyline([sp7, sp5, sp4, sp2])
+    ], delete_input=True)
 
-  def nextMid(self):
-    l = rs.AddLine(self.next1.cp, self.next2.cp)
-    p = rs.CurveMidPoint(l)
-    rs.DeleteObjects(l)
-    return rs.PlaneClosestPoint(self.p2, p)
+    vec1 = size_vector(rs.VectorCreate(p.Origin, np.Origin), 0.4)
+    perpVec1 = size_vector(perp_to_two(vec1, npv.ZAxis), DISC_RADIUS)
+    nsp1 = rs.VectorAdd(npv.Origin, perpVec1);
+    nsp2 = rs.VectorAdd(npv.Origin, rs.VectorReverse(perpVec1));
+    nsp3 = rs.VectorAdd(nsp1, vec1)
+    nsp4 = rs.VectorAdd(nsp2, vec1)
+    nsp5 = rs.VectorAdd(nsp4, size_vector(perpVec1, DISC_RADIUS - (MATERIAL_THICKNESS/2)))
+    nsp6 = rs.VectorAdd(nsp3, size_vector(rs.VectorReverse(perpVec1), DISC_RADIUS - (MATERIAL_THICKNESS/2)))
+    nsp7 = rs.VectorAdd(nsp5, size_vector(rs.VectorReverse(vec1), 0.2))
+    nsp8 = rs.VectorAdd(nsp6, size_vector(rs.VectorReverse(vec1), 0.2))
+    nbasePoint =  rs.VectorAdd(nsp7, size_vector(perpVec1, MATERIAL_THICKNESS/2))
+    nbasePoint = rs.AddPoint(nbasePoint)
+    dom1 = rs.CurveClosestPoint(ncv, nsp1)
+    dom2 = rs.CurveClosestPoint(ncv, nsp2)
+    nconn = rs.JoinCurves([
+        rs.TrimCurve(ncv, (dom2, dom1)),
+        rs.AddArcPtTanPt(nsp7, rs.VectorReverse(vec1), nsp8),
+        rs.AddPolyline([nsp1, nsp3, nsp6, nsp8]),
+        rs.AddPolyline([nsp7, nsp5, nsp4, nsp2])
+    ], delete_input=True)
+    return [conn, nconn, basePoint, nbasePoint]
 
-  def subtractionPiece(self, pl, crv, cpl):
-    point = cpl.Origin
-    vec = size_vector(pl.ZAxis, 0.5)
-    point2 = rs.PointAdd(point, vec)
-    crv = rs.ExtendCurveLength(crv, 0, 2, 1)
-    s = rs.CurveStartPoint(crv)
-    e = rs.CurveEndPoint(crv)
-    l = rs.AddLine(s,e)
-    crv = rs.JoinCurves([crv, l], delete_input=True)
-    srf = rs.ExtrudeCurve(crv, rs.AddLine(point, point2))
-    rs.CapPlanarHoles(srf)
-    rs.DeleteObjects(crv)
-    return srf
+  def trimCircle(self, c, p1, p2):
+    dom1 = rs.CurveClosestPoint(c, p1)
+    dom2 = rs.CurveClosestPoint(c, p2)
+    return rs.TrimCurve(c, (dom2, dom1))
+
+  def extrudeSrf(self, p, c):
+    sp = p.Origin
+    ep = rs.VectorAdd(sp, size_vector(p.ZAxis, MATERIAL_THICKNESS/2))
+    srf1 = rs.ExtrudeCurveStraight(c, sp, ep)
+    ep = rs.VectorAdd(sp, size_vector(rs.VectorReverse(p.ZAxis), MATERIAL_THICKNESS/2))
+    srf2 = rs.ExtrudeCurveStraight(c, sp, ep)
+    return rs.CapPlanarHoles(rs.JoinSurfaces([srf1, srf2], delete_input=True))
+
+  def addPipe(self, p1, p2):
+    l = rs.AddLine(p1, p2)
+    rs.AddPipe(l, 0, MATERIAL_THICKNESS/2)
+    return l
+
+  def buildSolids(self):
+    self.baseSolid = self.extrudeSrf(self.p1, self.base)
+    if hasattr(self, 'pv1'):
+        self.cv1Sold = self.extrudeSrf(self.pv1, self.cv1)
+    if hasattr(self, 'pv2'):
+        self.cv2Sold = self.extrudeSrf(self.pv2, self.cv2)
+    if hasattr(self, 'pv3'):
+        self.cv3Sold = self.extrudeSrf(self.pv3, self.cv3)
+    if hasattr(self, 'pv4'):
+        self.cv4Sold = self.extrudeSrf(self.pv4, self.cv4)
+
+  def createArcFirst(self, rec1, rec2):
+    tan = rs.CurveTangent(self.c1, rs.CurveClosestPoint(self.c1, rec1[1]))
+    arc1 = rs.AddArcPtTanPt(rec1[1], tan, rec2[0])
+    tan = rs.CurveTangent(self.c1, rs.CurveClosestPoint(self.c1, rec1[0]))
+    arc2 = rs.AddArcPtTanPt(rec1[0], rs.VectorReverse(tan), rec2[3])
+    tan = rs.CurveTangent(self.c2, rs.CurveClosestPoint(self.c2, rec1[2]))
+    arc3 = rs.AddArcPtTanPt(rec1[2], tan, rec2[1])
+    tan = rs.CurveTangent(self.c2, rs.CurveClosestPoint(self.c2, rec1[3]))
+    arc4 = rs.AddArcPtTanPt(rec1[3], rs.VectorReverse(tan), rec2[2])
+    return [arc1, arc2, arc3, arc4]
+
+  def cutBaseSlots(self, base, inter, p):
+    perpVec = size_vector(perp_to_two(p.ZAxis, rs.VectorCreate(p.Origin, inter)), MATERIAL_THICKNESS/2)
+    perpVec2 = rs.VectorReverse(perpVec)
+    vec = size_vector(rs.VectorCreate(p.Origin, inter), DISC_RADIUS)
+    p1 = rs.VectorAdd(inter, perpVec)
+    p2 = rs.VectorAdd(p1, vec)
+    p3 = rs.VectorAdd(inter, perpVec2)
+    p4 = rs.VectorAdd(p3, vec)
+    arc = rs.AddArcPtTanPt(p2, rs.VectorCreate(p2,p1), p4)
+    l1 = rs.AddLine(p1, p2)
+    l2 = rs.AddLine(p3, p4)
+    inter1 = rs.CurveCurveIntersection(l1, base)[0]
+    inter2 = rs.CurveCurveIntersection(l2, base)[0]
+    baseint1 = inter1[7] if inter1[7] < inter2[7] else inter2[7]
+    baseint2 = inter2[7] if inter1[7] < inter2[7] else inter1[7]
+    base = rs.TrimCurve(base, (baseint2, baseint1))
+    l1 = rs.TrimCurve(l1, (inter1[5], 0))
+    l2 = rs.TrimCurve(l2, (inter2[5], 0))
+    return rs.JoinCurves([base, l1, l2, arc], delete_input=True)
+
 
   def buildBase(self):
-    vec = rs.VectorScale(rs.VectorUnitize(self.p2.ZAxis), 0.2)
-    if self.index % 2 != 0 or self.index == 0:
-        vec = rs.VectorReverse(vec)
-    p = rs.PointAdd(self.cp, vec)
-
-    yvec = rs.VectorCreate(self.cp, self.nextMid())
-    xvec = rs.VectorCrossProduct(vec, yvec)
-    pl = rs.PlaneFromFrame(p, xvec, yvec)
-    w = self.distance_apart
-    h = self.flat_length
-    srf = rs.AddPlaneSurface(pl, w, h)
-    rs.MoveObject(srf, rs.VectorReverse(size_vector(pl.XAxis, w/2)))
-    rs.MoveObject(srf, rs.VectorReverse(size_vector(pl.YAxis, h/2)))
-    np = rs.PointAdd(p, size_vector(pl.ZAxis, 0.40))
-    l = rs.AddLine(p, np)
-    base = rs.ExtrudeSurface(srf, l)
-    rs.DeleteObjects(srf)
-    base = rs.BooleanDifference(base, self.subtractionPiece(pl, self.fillet1, self.p1))
-    base = rs.BooleanDifference(base, self.subtractionPiece(pl, self.fillet2, self.p2))
-    base = rs.BooleanDifference(base, self.subtractionPiece(pl, self.fillet3, self.p3))
-    base = rs.BooleanDifference(base, self.subtractionPiece(pl, self.fillet4, self.p4))
-    return [base, pl]
+    rec1 = self.createRec(self.p1, self.p4)
+    rec2 = self.createRec(self.p2, self.p3)
+    if self.index == 0:
+        rec2 = self.createRec(self.p4, self.p3)
+        rec1 = self.createRec(self.p1, self.p2)
+    arcs = self.createArcs(rec1, rec2) if self.index != 0 else self.createArcFirst(rec1,rec2)
+    self.c1 = self.trimCircle(self.c1, rec1[1], rec1[0])
+    self.c4 = self.trimCircle(self.c4, rec1[2], rec1[3]) if self.index != 0 else self.trimCircle(self.c4, rec2[1], rec2[0])
+    self.c3 = self.trimCircle(self.c3, rec2[2], rec2[3])
+    self.c2 = self.trimCircle(self.c2, rec2[1], rec2[0]) if self.index != 0 else self.trimCircle(self.c2, rec1[2], rec1[3])
+    self.base = rs.JoinCurves([self.c1, self.c2, self.c3, self.c4] + arcs, delete_input=True)
+    if hasattr(self, 'inter1'):
+        self.base = self.cutBaseSlots(self.base, self.inter1, self.p1)
+        self.cv1 = self.cutSlots(self.cv1, self.inter1, self.pv1, True)
+    if hasattr(self, 'inter2'):
+        self.base = self.cutBaseSlots(self.base, self.inter2, self.p2)
+        self.cv2 = self.cutSlots(self.cv2, self.inter2, self.pv2, True)
+    if hasattr(self, 'inter3'):
+        self.base = self.cutBaseSlots(self.base, self.inter3, self.p3)
+        self.cv3 = self.cutSlots(self.cv3, self.inter3, self.pv3, True)
+    if hasattr(self, 'inter4'):
+        self.base = self.cutBaseSlots(self.base, self.inter4, self.p4)
+        self.cv4 = self.cutSlots(self.cv4, self.inter4, self.pv4, True)
+    self.buildSolids()
 
   def link(self, next1, next2):
     self.next1 = next1
@@ -246,29 +253,37 @@ class JointPiece:
     interb = rs.CurveCurveIntersection(next1.c1, lb)[0][1]
     interc = rs.CurveCurveIntersection(self.c4, lc)[0][1]
     interd = rs.CurveCurveIntersection(next2.c3, ld)[0][1]
+    self.inter2 = intera
+    next1.inter1 = interb
+    self.inter4 = interc
+    next2.inter3 = interd
+    pla = rs.PlaneFromPoints(self.p2.Origin, rs.VectorAdd(self.p2.Origin, self.p2.ZAxis), intera)
+    plb = rs.PlaneFromPoints(next1.p1.Origin, rs.VectorAdd(next1.p1.Origin, next1.p1.ZAxis), interb)
+    plc = rs.PlaneFromPoints(self.p4.Origin, rs.VectorAdd(self.p4.Origin, self.p4.ZAxis), interc)
+    pld = rs.PlaneFromPoints(next2.p3.Origin, rs.VectorAdd(next2.p3.Origin, next2.p3.ZAxis), interd)
+    self.pv2 = pla
+    next1.pv1 = plb
+    self.pv4 = plc
+    next2.pv3 = pld
+    self.cv2 = rs.AddCircle(pla, DISC_RADIUS)
+    next1.cv1 = rs.AddCircle(plb, DISC_RADIUS)
+    self.cv4 = rs.AddCircle(plc, DISC_RADIUS)
+    next2.cv3 = rs.AddCircle(pld, DISC_RADIUS)
     rs.DeleteObjects([la, lb, lc, ld])
-    pla = rs.AddPolyline([self.point2, intera, interb, next1.point1])
-    plb = rs.AddPolyline([self.point4, interc, interd, next2.point3])
-    [srf1, srf2, crv1, crv2] = square_pipe(pla, self.p2, self.point2, self.index)
-    [srf3, srf4, crv3, crv4] = square_pipe(plb, self.p4, self.point4, self.index)
-    self.srf2 = [srf1, srf2, crv1, crv2] 
-    self.srf4 = [srf3, srf4, crv3, crv4]
-    next1.srf1 = self.srf2
-    next2.srf3 = self.srf4
-    next1.p1 = receiverSrf(next1.point1, crv1, crv2)
-    next2.p3 = receiverSrf(next2.point3, crv3, crv4)
-    rs.DeleteObjects([next1.c1, next2.c3])
-    next1.c1 = rs.AddCircle(next1.p1, 0.25)
-    next2.c3 = rs.AddCircle(next2.p3, 0.25)
+    [self.cv2, self.next1.cv1, self.basePoint2, self.next1.basePoint1] = self.connectToNext(self.p2, self.pv2, self.cv2, self.next1.p1, self.next1.pv1, self.next1.cv1)
+    [self.cv4, self.next2.cv3, self.basePoint4, self.next2.basePoint3] = self.connectToNext(self.p4, self.pv4, self.cv4, self.next2.p3, self.next2.pv3, self.next2.cv3)
+    self.l2 = self.addPipe(self.basePoint2, self.next1.basePoint1)
+    self.l4 = self.addPipe(self.basePoint4, self.next2.basePoint3)
 
   def layout_for_cut(self):
-    worldXY = rs.WorldXYPlane()
-    point1 = self.base[1].Origin
-    point2 = rs.PointAdd(point1, size_vector(self.base[1].XAxis, 1))
-    point3 = rs.PointAdd(point1, size_vector(self.base[1].YAxis, 1))
-    base = rs.OrientObject(rs.CopyObject(self.base[0]), [point1, point2, point3], [rs.AddPoint(0,0,0), rs.AddPoint(1,0,0), rs.AddPoint(0,1,0)])
-    rs.MoveObject(base, size_vector(worldXY.YAxis, (self.flat_length * 1.5) * (self.index + 1)))
-    rs.MoveObject(base, size_vector(worldXY.XAxis, (self.distance_apart * 2.25) * ((self.count/POINTS_ON_CROSS_SECTION) + 1)))
+    pass
+    # wintera ldXY = rs.WorldXYPlane()
+    # pointinterd= self.base[1].Origin
+    # point2 =intercs.PointAdd(point1, size_vector(self.base[1].XAxis, 1))
+    # point3 = rs.PointAdd(point1, size_vector(self.base[1].YAxis, 1))
+    # base = rs.OrientObject(rs.CopyObject(self.base[0]), [point1, point2, point3], [rs.AddPoint(0,0,0), rs.AddPoint(1,0,0), rs.AddPoint(0,1,0)])
+    # rs.MoveObject(base, size_vector(worldXY.YAxis, (self.flat_length * 1.5) * (self.index + 1)))
+    # rs.MoveObject(base, size_vector(worldXY.XAxis, (self.distance_apart * 2.25) * ((self.count/POINTS_ON_CROSS_SECTION) + 1)))
 
 class PathLattice:
 
@@ -279,12 +294,12 @@ class PathLattice:
     self.midpoints = []
     self.partsHash = {}
     self.curve_object = rs.GetObject("Pick a backbone curve", 4, True, False)
-    self.SAMPLES = rs.GetInteger("Set number of cross sections", 10)
-    self.flat_length = rs.GetReal('Set flat length', 0.75)
+    self.SAMPLES = rs.GetInteger("Set number of cross sections", 7)
+    self.flat_length = rs.GetReal('Set flat length', 0.50)
     self.BEND_RADIUS = rs.GetReal('set x radius', 2)
     self.PERP_RADIUS = rs.GetReal('set y radius', 2.5)
     self.RADIUS_SCALAR = rs.GetReal('Set radius scale', 2.5)
-    self.distance_apart = rs.GetReal('Set distance apart for flats', 0.65)
+    self.distance_apart = rs.GetReal('Set distance apart for flats', 0.35)
     self.create_cross_sections()
     self.brep = rs.AddLoftSrf(self.cross_sections)
     self.points_from_cross()
@@ -316,7 +331,7 @@ class PathLattice:
             else:
                 self.joints[i].link(self.joints[(i + 1) % jlen], self.joints[(i + self.SAMPLES + 2) % jlen])
     for i in range(0, jlen):
-        self.joints[i].buildConnector()
+        self.joints[i].buildBase()
         self.joints[i].layout_for_cut()
 
 
@@ -386,7 +401,6 @@ class PathLattice:
       self.line_points.append(points_2)
 
   def add_joint_piece(self, point1, point2, point3, point4, cp, count, index, indexes):
-    rs.AddText(str(count), cp)
     self.joints.append(JointPiece(
         point1,
         point2,
